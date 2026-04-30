@@ -168,25 +168,62 @@ module emu
 	// 2..6 - USR2..USR6
 	// Set USER_OUT to 1 to read from USER_IN.
 	output        USER_OSD,
-	output  [1:0] USER_MODE,
+	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: per-pin push-pull mask
+	output  [7:0] USER_PP,
+	// [MiSTer-DB9 END]
 	input   [7:0] USER_IN,
 	output  [7:0] USER_OUT,
 
 	input         OSD_STATUS
 );
 
+
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USER_PP default (port_batch replaces with USER_PP_DRIVE)
+assign USER_PP = USER_PP_DRIVE;
+// [MiSTer-DB9 END]
 //`define DEBUG_BUILD
 
 assign ADC_BUS  = 'Z;
 
-wire         CLK_JOY = CLK_50M;         //Assign clock between 40-50Mhz
-wire   [2:0] JOY_FLAG  = {status[62],status[63],status[61]}; //Assign 3 bits of status (31:29) o (63:61)
-wire         JOY_CLK, JOY_LOAD, JOY_SPLIT, JOY_MDSEL;
-wire   [5:0] JOY_MDIN  = JOY_FLAG[2] ? {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN[7],USER_IN[1],USER_IN[2]} : '1;
-wire         JOY_DATA  = JOY_FLAG[1] ? USER_IN[5] : '1;
-//assign       USER_OUT  = JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
-assign       USER_MODE = JOY_FLAG[2:1] ;
-assign       USER_OSD  = joydb_1[10] & joydb_1[6];
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper
+wire         CLK_JOY = CLK_50M;                 // Assign clock between 40-50Mhz
+wire   [1:0] joy_type        = status[127:126]; // 0=Off, 1=Saturn, 2=DB9MD, 3=DB15
+wire         joy_2p          = status[125];
+wire         joy_db9md_en    = (joy_type == 2'd2);
+wire         joy_db15_en     = (joy_type == 2'd3);
+wire         joy_any_en      = |joy_type;
+// Legacy 3-bit alias for fork-specific MT32 / SNAC fallback code. Non-canonical
+// RHS variants (ext_iec_en, mt32_disable) need a hand-port — alias is raw.
+wire   [2:0] JOY_FLAG        = {joy_db9md_en, joy_db15_en, joy_2p};
+// [MiSTer-DB9 END]
+
+// [MiSTer-DB9-Pro BEGIN] - Saturn key gate
+wire         saturn_unlocked;                   // driven by hps_io UIO_DB9_KEY (0xFE)
+// [MiSTer-DB9-Pro END]
+
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper wires + instance
+wire   [7:0] USER_OUT_DRIVE;
+wire   [7:0] USER_PP_DRIVE;
+wire  [15:0] joydb_1, joydb_2;
+wire         joydb_1ena, joydb_2ena;
+wire  [15:0] joy_raw_payload;
+
+joydb joydb (
+  .clk             ( CLK_JOY         ),
+  .USER_IN         ( USER_IN         ),
+  .joy_type        ( joy_type        ),
+  .joy_2p          ( joy_2p          ),
+  .saturn_unlocked ( saturn_unlocked ),
+  .USER_OUT_DRIVE  ( USER_OUT_DRIVE  ),
+  .USER_PP_DRIVE   ( USER_PP_DRIVE   ),
+  .USER_OSD        ( USER_OSD        ),
+  .joydb_1         ( joydb_1         ),
+  .joydb_2         ( joydb_2         ),
+  .joydb_1ena      ( joydb_1ena      ),
+  .joydb_2ena      ( joydb_2ena      ),
+  .joy_raw         ( joy_raw_payload )
+);
+// [MiSTer-DB9 END]
 
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 
@@ -349,8 +386,10 @@ parameter CONF_STR = {
 	"P2-;",
 	"P2OH,Multitap,Disabled,Port2;",
 	"P2O34,Serial,OFF,SNAC SNES,SNAC GB;",
-	"P2oUV,UserIO Joystick,Off,DB9MD,DB15 ;",
-	"P2oT,UserIO Players, 1 Player,2 Players;",
+		// [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type (canonical bit notation)
+	"P2O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
+	"P2O[125],UserIO Players, 1 Player,2 Players;",
+	// [MiSTer-DB9-Pro END]
 	"P2oS,Buttons Config.,Option 1,Option 2;",
 	"P2-;",
 
@@ -378,7 +417,9 @@ parameter CONF_STR = {
 };
 
 wire  [1:0] buttons;
-wire [63:0] status;
+// [MiSTer-DB9 BEGIN] - widened to 128 bits for joy_type at [127:126] and joy_2p at [125]
+wire [127:0] status;
+// [MiSTer-DB9 END]
 wire [15:0] status_menumask = {ss_allow, en216p, 1'b1, 1'b1, ~gg_available, 1'b1, ~sav_supported };
 wire        forced_scandoubler;
 reg  [31:0] sd_lba;
@@ -432,36 +473,8 @@ wire [31:0] joy2 = joydb_2ena ? joy1_USB : joydb_1ena ? joy1_USB : joy2_USB;
 wire [31:0] joy3 = joydb_2ena ? joy2_USB : joydb_1ena ? joy2_USB : joy3_USB;
 wire [31:0] joy4 = joydb_2ena ? joy2_USB : joydb_1ena ? joy3_USB : joy4_USB;
 
-wire [15:0] joydb_1 = JOY_FLAG[2] ? JOYDB9MD_1 : JOY_FLAG[1] ? JOYDB15_1 : '0;
-wire [15:0] joydb_2 = JOY_FLAG[2] ? JOYDB9MD_2 : JOY_FLAG[1] ? JOYDB15_2 : '0;
-wire        joydb_1ena = |JOY_FLAG[2:1]              ;
-wire        joydb_2ena = |JOY_FLAG[2:1] & JOY_FLAG[0];
 
-//----BA 9876543210
-//----MS ZYXCBAUDLR
-reg [15:0] JOYDB9MD_1,JOYDB9MD_2;
-joy_db9md joy_db9md
-(
-  .clk       ( CLK_JOY    ), //40-50MHz
-  .joy_split ( JOY_SPLIT  ),
-  .joy_mdsel ( JOY_MDSEL  ),
-  .joy_in    ( JOY_MDIN   ),
-  .joystick1 ( JOYDB9MD_1 ),
-  .joystick2 ( JOYDB9MD_2 )
-);
 
-//----BA 9876543210
-//----LS FEDCBAUDLR
-reg [15:0] JOYDB15_1,JOYDB15_2;
-joy_db15 joy_db15
-(
-  .clk       ( CLK_JOY   ), //48MHz
-  .JOY_CLK   ( JOY_CLK   ),
-  .JOY_DATA  ( JOY_DATA  ),
-  .JOY_LOAD  ( JOY_LOAD  ),
-  .joystick1 ( JOYDB15_1 ),
-  .joystick2 ( JOYDB15_2 )
-);
 
 
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
@@ -478,7 +491,12 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.joystick_2(joy2_USB),
 	.joystick_3(joy3_USB),
 	.joystick_4(joy4_USB),
-	.joy_raw(OSD_STATUS? (joydb_1[11:0] | joydb_2[11:0]) : 12'b0),
+	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joy_raw
+	.joy_raw(OSD_STATUS ? joy_raw_payload : 16'b0),
+	// [MiSTer-DB9 END]
+	// [MiSTer-DB9-Pro BEGIN] - Saturn key gate
+	.saturn_unlocked(saturn_unlocked),
+	// [MiSTer-DB9-Pro END]
 	.ps2_mouse(ps2_mouse),
 	.ps2_key(ps2_key),
 
@@ -1077,11 +1095,6 @@ wire gb_ser_clk_out;
 wire snac_snes = status[3];
 wire snac_gb   = status[4];
 
-assign USER_OUT[2] = 1'b1;
-assign USER_OUT[3] = 1'b1;
-assign USER_OUT[5] = 1'b1;
-assign USER_OUT[7] = 1'b1;
-
 // JOYX_DO[0] is P4, JOYX_DO[1] is P5
 wire [1:0] JOY1_DI;
 wire [1:0] JOY2_DI;
@@ -1090,10 +1103,9 @@ wire JOY2_P6_DI;
 always_comb begin
 	gb_ser_data_in = 1'b1;
 	gb_ser_clk_in = 1'b1;
-	USER_OUT[0] = 1'b1;
-	USER_OUT[1] = 1'b1;
-	USER_OUT[4] = 1'b1;
-	USER_OUT[6] = 1'b1;
+	// [MiSTer-DB9 BEGIN] - default USER_OUT from joydb wrapper (Off/DB9MD/DB15/Saturn)
+	USER_OUT = USER_OUT_DRIVE;
+	// [MiSTer-DB9 END]
 	JOY1_DI = JOY1_DO;
 	JOY2_DI = JOY2_DO;
 	JOY2_P6_DI = 1'b1;
@@ -1110,18 +1122,6 @@ always_comb begin
 		USER_OUT[1] = gb_ser_data_out;
 		gb_ser_data_in = USER_IN[2];
 		gb_ser_clk_in = USER_IN[0];
-	end
-	else if (JOY_FLAG[1]) begin
-		USER_OUT[0] = JOY_LOAD;
-		USER_OUT[1] = JOY_CLK;
-		USER_OUT[6] = 1'b1;
-		USER_OUT[4] = 1'b1;
-	end
-	else if (JOY_FLAG[2]) begin
-		USER_OUT[0] = JOY_MDSEL;
-		USER_OUT[1] = 1'b1;
-		USER_OUT[6] = 1'b1;
-		USER_OUT[4] = JOY_SPLIT;
 	end
 end
 
