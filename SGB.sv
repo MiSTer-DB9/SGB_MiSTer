@@ -506,7 +506,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 
 	.status(status),
 	.status_menumask(status_menumask),
-	.status_in({status[63:49], ss_slot, status[46:0]}),
+	// [MiSTer-DB9 BEGIN] - widened to 128 bits, preserve [127:64] (joy_type at [127:125], joy_2p at [124])
+	.status_in({status[127:49], ss_slot, status[46:0]}),
+	// [MiSTer-DB9 END]
 	.status_set(ss_status),
 
 	.ioctl_addr(ioctl_addr),
