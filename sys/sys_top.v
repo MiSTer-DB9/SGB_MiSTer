@@ -307,8 +307,8 @@ wire       csync_en     = cfg[3];
 wire       io_osd_vga   = io_ss1 & ~io_ss2;
 `ifndef MISTER_DUAL_SDRAM
 	wire forced_scandoubler = cfg[4];
-	wire    ypbpr_en     = cfg[5];
-	wire    sog          = cfg[9];
+	wire ypbpr_en           = cfg[5];
+	wire sog                = cfg[9];
 	`ifdef MISTER_DEBUG_NOHDMI
 		wire vga_scaler   = 0;
 	`else
@@ -523,14 +523,14 @@ always@(posedge clk_sys) begin
 			if(cmd == 'h41) begin
 				case(cnt[3:0])
 `ifndef MISTER_DISABLE_YC
-					 0: {pal_en,cvbs,yc_en}    <= io_din[2:0];
+					0: {pal_en,cvbs,yc_en}    <= io_din[2:0];
 					4: ColorBurst_Range[15:0] <= io_din;
 					5: ColorBurst_Range[16]   <= io_din[0];
 `endif
 					// Subcarrier commands (independent of YC module)
-					 1: PhaseInc[15:0]         <= io_din;
-					 2: PhaseInc[31:16]        <= io_din;
-					 3: PhaseInc[39:32]        <= io_din[7:0];
+					1: PhaseInc[15:0]         <= io_din;
+					2: PhaseInc[31:16]        <= io_din;
+					3: PhaseInc[39:32]        <= io_din[7:0];
 `ifndef MISTER_DUAL_SDRAM
 					6: subcarrier             <= io_din[0];
 `endif
@@ -747,9 +747,9 @@ wire         bob_deint;
 	)
 	ascal
 	(
-		.reset_na (~reset_req),
-		.run      (1),
-		.freeze   (freeze),
+		.reset_na   (~reset_req),
+		.run        (1),
+		.freeze     (freeze),
 		.bob_deint  (bob_deint),
 
 		.i_clk    (clk_ihdmi),

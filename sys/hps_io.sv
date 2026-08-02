@@ -44,7 +44,7 @@ module hps_io #(parameter CONF_STR, CONF_STR_BRAM=0, PS2DIV=0, WIDE=0, VDNUM=1, 
 	output reg [31:0] joystick_3,
 	output reg [31:0] joystick_4,
 	output reg [31:0] joystick_5,
-	
+
 	// analog -127..+127, Y: [15:8], X: [7:0]
 	output reg [15:0] joystick_l_analog_0,
 	output reg [15:0] joystick_l_analog_1,
@@ -295,7 +295,7 @@ always@(posedge clk_sys) begin : uio_block
 		stflg <= stflg + 1'd1;
 		status_req <= status_in;
 	end
-	
+
 	old_upload_req <= ioctl_upload_req;
 	if(~old_upload_req & ioctl_upload_req) upload_req <= 1;
 
@@ -342,7 +342,7 @@ always@(posedge clk_sys) begin : uio_block
 				  'h29: io_dout <= {4'hA, stflg};
 				  'h32: io_dout <= gamma_bus[21];
 				  'h36: begin io_dout <= info_n; info_n <= 0; end
-				  'h3C: if(upload_req) begin io_dout <= {ioctl_upload_index, 8'd1}; upload_req <= 0; end
+				  'h3C: if(upload_req) begin io_dout <= {ioctl_upload_index, 8'd1}; upload_req <= 0; end				  
 				  'h43: io_dout <= |F12KEYMOD;
 				'h003F: io_dout <= joystick_0_rumble;
 				'h013F: io_dout <= joystick_1_rumble;
@@ -534,7 +534,7 @@ always@(posedge clk_sys) begin : uio_block
 
 				//menu mask
 				'h2E: if(byte_cnt == 1) io_dout <= status_menumask;
-				
+
 				//sdram size set
 				'h31: if(byte_cnt == 1) sdram_sz <= io_din;
 
@@ -642,7 +642,7 @@ always@(posedge clk_sys) begin : fio_block
 	reg        wr;
 	reg  [1:0] req_io;
 	reg        skip_add;
-	
+
 	ioctl_rd <= 0;
 	ioctl_wr <= wr;
 	wr <= 0;
@@ -682,7 +682,7 @@ always@(posedge clk_sys) begin : fio_block
 					FIO_FILE_TX:
 						begin
 							cnt <= cnt + 1'd1;
-							case(cnt) 
+							case(cnt)
 								0:	if(io_din[7:0]) begin
 										ioctl_addr <= 0;
 										req_io <= (io_din[7:0] == 8'hAA) ? 2'b10 : 2'b01;
@@ -702,14 +702,14 @@ always@(posedge clk_sys) begin : fio_block
 							if(!skip_add) ioctl_addr <= ioctl_addr + (WIDE ? 2'd2 : 2'd1);
 							skip_add <= 0;
 							
-						if(ioctl_download) begin
-							ioctl_dout <= io_din[DW:0];
-							wr   <= 1;
-						end
-						else begin
-							fp_dout <= ioctl_din;
-							ioctl_rd <= 1;
-						end
+							if(ioctl_download) begin
+								ioctl_dout <= io_din[DW:0];
+								wr <= 1;
+							end
+							else begin
+								fp_dout <= ioctl_din;
+								ioctl_rd <= 1;
+							end
 						end
 				endcase
 			end
