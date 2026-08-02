@@ -28,7 +28,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [48:0] HPS_BUS,
+	inout  [45:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        CLK_VIDEO,
@@ -56,6 +56,8 @@ module emu
 	input  [11:0] HDMI_WIDTH,
 	input  [11:0] HDMI_HEIGHT,
 	output        HDMI_FREEZE,
+	output        HDMI_BLACKOUT,
+	output        HDMI_BOB_DEINT,
 
 `ifdef MISTER_FB
 	// Use framebuffer in DDRAM
@@ -264,6 +266,8 @@ assign BUTTONS   = osd_btn;
 assign VGA_SCALER= 0;
 assign HDMI_FREEZE = 0;
 assign VGA_DISABLE = 0;
+assign HDMI_BLACKOUT = 0;
+assign HDMI_BOB_DEINT = 0;
 
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 
@@ -369,7 +373,7 @@ wire reset = RESET | buttons[1] | status[0] | cart_download | gb_cart_download |
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// X  XXXXX XXXXXX  X XX  XXXXXXXXX XXXXXXXXXXXX      XXX
+// X  XXXXX XXXXXX  X XX  XXXXXXXXX XXXXXXXXXXXXX     XXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -395,6 +399,8 @@ parameter CONF_STR = {
 	"D0-;",
 
 	"P1,Audio & Video;",
+	"P1-;",
+	"P1O[44],GB Extra sprites,No,Yes;",
 	"P1-;",
 	"P1o02,Aspect ratio,Original,Original GB,Full Screen,[ARC1],[ARC2];",
 	"P1O9B,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
@@ -717,6 +723,7 @@ main main
 
 	.GB_MAPPER(gb_mapper),
 	.SGB_SPEED(sgb_speed),
+	.GB_EXTRA_SPRITES(status[44]),
 
 	.GB_AUDIO_NO_POPS(status[43]),
 	.GB_AUDIO_L(GB_AUDIO_L),
@@ -743,8 +750,13 @@ main main
 	.MSU_TRACK_MISSING(msu_track_missing),
 	.MSU_VOLUME(msu_volume),
 	.MSU_AUDIO_REPEAT(msu_audio_repeat),
+	.MSU_AUDIO_RESUME(msu_audio_resume),
 	.MSU_AUDIO_STOP(msu_audio_stop),
 	.MSU_AUDIO_PLAYING(msu_audio_playing),
+	.MSU_AUDIO_SECTOR(msu_audio_sector),
+	.MSU_RESUME_SECTOR(msu_resume_sector),
+	.MSU_AUDIO_LOOP_INDEX(msu_audio_loop_index),
+	.MSU_RESUME_LOOP_INDEX(msu_resume_loop_index),
 	.MSU_DATA_ADDR(msu_data_addr),
 	.MSU_DATA(msu_data),
 	.MSU_DATA_ACK(msu_data_ack),
@@ -1311,11 +1323,15 @@ wire  [7:0] msu_volume;
 wire        msu_audio_repeat;
 wire        msu_audio_playing;
 wire        msu_audio_stop;
+wire        msu_audio_resume;
 
 wire        msu_audio_ack;
 wire        msu_audio_req;
 wire        msu_audio_seek;
 wire [21:0] msu_audio_sector;
+wire [21:0] msu_resume_sector;
+wire [31:0] msu_audio_loop_index;
+wire [31:0] msu_resume_loop_index;
 
 wire [15:0] msu_audio_l;
 wire [15:0] msu_audio_r;
@@ -1330,10 +1346,11 @@ msu_audio msu_audio
 	.ctl_volume(msu_volume),
 	.ctl_stop(msu_audio_stop),
 	.ctl_play(msu_audio_playing),
+	.ctl_resume(msu_audio_resume),
 	.ctl_repeat(msu_audio_repeat),
 
 	.track_size(msu_audio_size),
-	.track_processing(msu_track_missing | msu_track_mounting | msu_track_request),
+	.track_processing(msu_track_request),
 
 	.audio_download(msu_audio_download),
 	.audio_data(ioctl_dout),
@@ -1343,6 +1360,9 @@ msu_audio msu_audio
 	.audio_sector(msu_audio_sector),
 	.audio_req(msu_audio_req),
 	.audio_seek(msu_audio_seek),
+	.resume_sector(msu_resume_sector),
+	.audio_loop_index(msu_audio_loop_index),
+	.resume_loop_index(msu_resume_loop_index),
 
 	.audio_l(msu_audio_l),
 	.audio_r(msu_audio_r)

@@ -21,6 +21,7 @@ module ICD2(
 	input       [1:0] sgb_speed,
 	output reg        gb_rst_n,
 	output            gb_clk_en,
+	output            gb_clk_en_n,
 
 	input             ss_gb_paused
 
@@ -28,7 +29,7 @@ module ICD2(
 
 reg  [7:0] packet_data[0:15];
 reg  [7:0] data;
-reg  [3:0] byte_cnt;
+reg  [4:0] byte_cnt;
 reg  [2:0] cnt;
 reg        old_p15, old_p14;
 reg        new_packet, byte_done, packet_end;
@@ -51,7 +52,8 @@ reg        old_lcd_vs;
 reg        cpurd_n_old, cpuwr_n_old;
 
 reg [31:0] gb_out_clk;
-reg        gb1_ce, gb2_ce;
+reg        gb_ce, gb_ce_n;
+reg        gb_2x_ce;
 
 // The ICD chip only has A22,A15-A11 and A3-A0 connected
 wire icd2_sel = ~ca[22] & (ca[15:13] == 3'b011); // 00-3F,80-BF:6xxN/7xxN
@@ -96,28 +98,6 @@ always @(posedge clk or negedge rst_n) begin
 end
 
 
-// Simple clock divider for SGB1 speed.
-wire [3:0] gb_clk_div =
-		(gb_cpu_speed == 2'd0) ? 4'd3 :
-		(gb_cpu_speed == 2'd1) ? 4'd4 :
-		(gb_cpu_speed == 2'd2) ? 4'd6 :
-		                         4'd8;
-
-always @(posedge clk) begin
-	if (~rst_n) begin
-		gb1_ce  <= 0;
-		gb_clk_cnt <= 0;
-	end else begin
-		gb_clk_cnt <= gb_clk_cnt + 1'b1;
-
-		gb1_ce <= 0;
-		if (gb_clk_cnt == gb_clk_div) begin
-			gb_clk_cnt <= 0;
-			gb1_ce  <= 1'b1;
-		end
-	end
-end
-
 localparam MCLK_NTSC = 21477270;
 localparam MCLK_PAL  = 21281370;
 localparam MCLK_SGB2 = 20971520;
@@ -125,29 +105,53 @@ localparam MCLK_SNES = 21101890; // Closest to 60.09Hz refresh rate to avoid stu
 
 // CEGen for async clock dividers (SGB2 & SNES speed)
 always @(posedge clk) begin
-	case ({ (sgb_speed == 2'd2), gb_cpu_speed })
-		{1'b0, 2'd0}: gb_out_clk <= MCLK_SGB2/4;
-		{1'b0, 2'd1}: gb_out_clk <= MCLK_SGB2/5;
-		{1'b0, 2'd2}: gb_out_clk <= MCLK_SGB2/7;
-		{1'b0, 2'd3}: gb_out_clk <= MCLK_SGB2/9;
+	case ({ sgb_speed, gb_cpu_speed })
+		{2'd0, 2'd0}: gb_out_clk <= pal ? MCLK_PAL*2/4 : MCLK_NTSC*2/4;
+		{2'd0, 2'd1}: gb_out_clk <= pal ? MCLK_PAL*2/5 : MCLK_NTSC*2/5;
+		{2'd0, 2'd2}: gb_out_clk <= pal ? MCLK_PAL*2/7 : MCLK_NTSC*2/7;
+		{2'd0, 2'd3}: gb_out_clk <= pal ? MCLK_PAL*2/9 : MCLK_NTSC*2/9;
 
-		{1'b1, 2'd0}: gb_out_clk <= MCLK_SNES/4;
-		{1'b1, 2'd1}: gb_out_clk <= MCLK_SNES/5;
-		{1'b1, 2'd2}: gb_out_clk <= MCLK_SNES/7;
-		{1'b1, 2'd3}: gb_out_clk <= MCLK_SNES/9;
+		{2'd1, 2'd0}: gb_out_clk <= MCLK_SGB2*2/4;
+		{2'd1, 2'd1}: gb_out_clk <= MCLK_SGB2*2/5;
+		{2'd1, 2'd2}: gb_out_clk <= MCLK_SGB2*2/7;
+		{2'd1, 2'd3}: gb_out_clk <= MCLK_SGB2*2/9;
+
+		{2'd2, 2'd0}: gb_out_clk <= MCLK_SNES*2/4;
+		{2'd2, 2'd1}: gb_out_clk <= MCLK_SNES*2/5;
+		{2'd2, 2'd2}: gb_out_clk <= MCLK_SNES*2/7;
+		{2'd2, 2'd3}: gb_out_clk <= MCLK_SNES*2/9;
+		default: ;
 	endcase
 end
 
-CEGen gb_ce
+CEGen gb_ce_gen
 (
 	.CLK(clk),
 	.RST_N(rst_n),
 	.IN_CLK(pal ? MCLK_PAL : MCLK_NTSC),
 	.OUT_CLK(gb_out_clk),
-	.CE(gb2_ce)
+	.CE(gb_2x_ce)
 );
 
-assign gb_clk_en = ~ss_gb_paused & ((sgb_speed == 2'd0) ? gb1_ce : gb2_ce);
+reg gb_ce_pol;
+always @(posedge clk) begin
+	if (~rst_n) begin
+		gb_ce  <= 1'b0;
+		gb_ce_n <= 1'b0;
+		gb_ce_pol <= 1'b0;
+	end else begin
+		gb_ce <= 1'b0;
+		gb_ce_n <= 1'b0;
+		if (gb_2x_ce & ~ss_gb_paused) begin
+			gb_ce <= ~gb_ce_pol;
+			gb_ce_n <= gb_ce_pol;
+			gb_ce_pol <= ~gb_ce_pol;
+		end
+	end
+end
+
+assign gb_clk_en = gb_ce;
+assign gb_clk_en_n = gb_ce_n;
 
 // SGB command packets
 always @(posedge clk or negedge rst_n) begin
@@ -165,10 +169,11 @@ always @(posedge clk or negedge rst_n) begin
 					old_p15	   <= di[1];
 					byte_done  <= di[2];
 					new_packet <= di[3];
+					byte_cnt[4] <= di[5];
 				end
 				8'h01: begin
 					packet_end <= di[0];
-					byte_cnt   <= di[4:1];
+					byte_cnt[3:0] <= di[4:1];
 					cnt        <= di[7:5];
 				end
 				8'h02: data <= di;
@@ -186,33 +191,31 @@ always @(posedge clk or negedge rst_n) begin
 
 			// Reset pulse
 			if (~p15 & ~p14) begin
-				{cnt, byte_cnt, packet_end} <= 0;
-			end
-
-			if ( old_p15 & old_p14 & (p15 ^ p14) ) begin
-				if (~packet_end) begin
-					data <= {~p15,data[7:1]};
-					cnt <= cnt + 1'b1;
-					if (&cnt) byte_done <= 1'b1;
-				end
-			end
-
-			// Corrupt packet. p15 and p14 should both go high after one is low.
-			if ( (old_p15 ^ p15) & (old_p15 ^ old_p14) & (p15 ^ p14) ) begin
+				{ cnt, byte_cnt } <= 0;
 				packet_end <= 1'b1;
+			end
+
+			if ((~old_p15 | ~old_p14) & (p15 & p14)) begin
+				if (~old_p15 & ~old_p14) begin // 00 -> 11 Packet start
+					packet_end <= 1'b0;
+				end else if (~packet_end) begin	// 01/10 -> 11 Write bit
+					if (~byte_cnt[4]) begin
+						data <= {old_p14, data[7:1]};
+						cnt <= cnt + 1'b1;
+						if (&cnt) byte_done <= 1'b1;
+					end else begin
+						// End of packet
+						packet_end <= 1'b1;
+						new_packet <= 1'b1;
+					end
+				end
 			end
 
 			if (byte_done) begin
 				byte_done <= 0;
 				byte_cnt <= byte_cnt + 1'b1;
 
-				packet_data[byte_cnt] <= data;
-
-				// End of packet
-				if (&byte_cnt) begin
-					packet_end <= 1'b1;
-					new_packet <= 1'b1;
-				end
+				packet_data[byte_cnt[3:0]] <= data;
 			end
 		end
 
@@ -394,8 +397,8 @@ always @(posedge clk) begin
 		ss_do <= trn_data_q;
 	end else begin
 		case (ca[7:0])
-			8'h00: ss_do <= { 3'd0, old_lcd_vs, new_packet, byte_done, old_p15, old_p14 };
-			8'h01: ss_do <= { cnt, byte_cnt, packet_end };
+			8'h00: ss_do <= { 2'd0, byte_cnt[4], old_lcd_vs, new_packet, byte_done, old_p15, old_p14 };
+			8'h01: ss_do <= { cnt, byte_cnt[3:0], packet_end };
 			8'h02: ss_do <= data;
 			8'h03: ss_do <= { gb_rst_n, 1'd0, num_controllers, joypad_id, gb_cpu_speed };
 			8'h04: ss_do <= buttons1;
