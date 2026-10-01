@@ -181,7 +181,9 @@ module emu
 
 
 // [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USER_PP default (port_batch replaces with USER_PP_DRIVE)
-assign USER_PP = USER_PP_DRIVE;
+// SNES SNAC drives Strobe (IO0) and Clk (IO1) push-pull: the weak pull-up alone
+// cannot latch the pad on adapters without their own pull-ups. GB link stays open-drain.
+assign USER_PP = USER_PP_DRIVE | (snac_snes ? 8'b00000011 : 8'b00000000);
 // [MiSTer-DB9 END]
 //`define DEBUG_BUILD
 
